@@ -1,0 +1,32 @@
+# Core data science
+xarray
+numpy
+pandas
+scipy
+matplotlib
+geopandas
+rioxarray
+shapely
+rasterio
+
+# Google Drive integration
+pydrive2
+oauth2client
+
+# Google Earth Engine (for GEE SMAP tab)
+earthengine-api
+
+# Streamlit UI
+streamlit
+plotly
+
+# HTTP requests (Ollama LLM calls)
+requests
+
+# PDF / literature management
+pymupdf          # fitz — PDF parsing
+python-docx      # DOCX parsing
+Pillow           # image processing
+
+# Environment variable management
+python-dotenv
