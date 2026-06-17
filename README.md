@@ -1,13 +1,13 @@
 # 🌍 A.V.A.N.I. — Soil Moisture Intelligence Engine
 
-**A.V.A.N.I.** (Advanced Vegetation And Nature Intelligence) is an AI-powered soil moisture analysis platform built for India. It combines satellite data, local LLMs, Google Earth Engine, and scientific literature into a conversational Streamlit interface.
+**A.V.A.N.I.** is an AI-powered soil moisture analysis platform built for India. It combines satellite data, local LLMs, Google Earth Engine, and scientific literature into a conversational Streamlit interface.
 
 ---
 
 ## ✨ Features
 
 - 🗣️ **Natural language queries** — Ask in plain English (e.g. *"Show soil moisture trend in Punjab from 2015 to 2020"*)
-- 📊 **Analysis operations** — Mean, anomaly, trend, comparison, seasonal patterns
+- 📊 **Analysis operations** — Mean, trend, comparison, seasonal patterns
 - 🗺️ **Spatial maps** — State-level and India-wide choropleth maps with real shapefile borders
 - ☁️ **GEE SMAP tab** — Live NASA SMAP 9km data via Google Earth Engine
 - 📚 **Literature Q&A** — Upload scientific PDFs and query them with vision AI
@@ -221,7 +221,6 @@ Google Drive (your datasets)
 "Show soil moisture trend in Maharashtra from 2015 to 2022"
 "Compare Punjab and Haryana soil moisture in 2019"
 "What is the seasonal pattern in Rajasthan?"
-"Show anomaly map for India in 2018"
 "Summarise findings from the uploaded paper"
 ```
 

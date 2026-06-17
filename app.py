@@ -1206,10 +1206,6 @@ def _is_smap_cloud_query(query: str) -> bool:
 
 def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                              ds_start, ds_end, lit_manager):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
     with st.chat_message("assistant"):
         clean_prompt = sanitise_input(prompt)
 
@@ -1277,9 +1273,10 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                 full_response_parts.append(err_text)
             else:
                 for r in res.get("results", []):
-                    analysis_text = "### 📊 Dataset Analysis\n```\n" + r["message"] + "\n```\n\n"
-                    st.markdown(analysis_text)
-                    full_response_parts.append(analysis_text)
+                    msg = r["message"].strip()
+                    if msg:
+                        st.markdown(msg)
+                        full_response_parts.append(msg)
 
                     if r.get("viz") and os.path.isfile(r["viz"]):
                         display_images.append(r["viz"])
@@ -1289,6 +1286,9 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                         full_response_parts.append(lit_findings)
 
             for img in display_images:
+                img_basename = os.path.basename(img)
+                clean_name = " ".join(img_basename.split("_")[:2]).title()
+                st.markdown(f"**🗺️ {clean_name}**")
                 st.image(img, use_container_width=True)
             st.session_state.messages.append({
                 "role":    "assistant",
@@ -1398,9 +1398,10 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                     full_response_parts.append(error_text)
                 else:
                     for r in res.get("results", []):
-                        analysis_text = r["message"] + "\n\n"
-                        st.text(analysis_text)
-                        full_response_parts.append(analysis_text)
+                        msg = r["message"].strip()
+                        if msg:
+                            st.markdown(msg)
+                            full_response_parts.append(msg)
                         if r.get("viz") and os.path.isfile(r["viz"]):
                             display_images.append(r["viz"])
                         if r.get("literature"):
@@ -1409,6 +1410,10 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                             full_response_parts.append(lit_findings)
 
         for img in display_images:
+            # Extract just "Analysis Mean" or "Analysis Trend" from the filename
+            img_basename = os.path.basename(img)
+            clean_name = " ".join(img_basename.split("_")[:2]).title()
+            st.markdown(f"**🗺️ {clean_name}**")
             st.image(img, use_container_width=True)
 
         st.session_state.messages.append({
@@ -1626,11 +1631,21 @@ if system_ready:
                 st.markdown(msg["content"])
                 for img in msg.get("images", []):
                     if os.path.isfile(img):
+                        img_basename = os.path.basename(img)
+                        clean_name = " ".join(img_basename.split("_")[:2]).title()
+                        st.markdown(f"**🗺️ {clean_name}**")
                         st.image(img, use_container_width=True)
 
         if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.pending_prompt = prompt
+            st.rerun()
+
+        if "pending_prompt" in st.session_state:
+            _prompt_to_process = st.session_state.pending_prompt
+            del st.session_state["pending_prompt"]
             _process_pending_prompt(
-                prompt, engine, classifier, agent, validator,
+                _prompt_to_process, engine, classifier, agent, validator,
                 ds_start, ds_end, lit_manager
             )
 

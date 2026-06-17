@@ -21,54 +21,29 @@ class OutputFormatter:
         if output_type == 'scalar':
             return OutputFormatter._format_scalar_mean(data, region, start_date, end_date)
         elif output_type == 'map':
-            return "🗺️  Mean moisture map will be generated. Check 'latest_analysis.png'"
+            return ""
         else:
-            result  = OutputFormatter._format_scalar_mean(data, region, start_date, end_date)
-            result += "\n📊 Map visualization saved to 'latest_analysis.png'\n"
-            return result
+            return OutputFormatter._format_scalar_mean(data, region, start_date, end_date)
 
     @staticmethod
     def _format_scalar_mean(data, region, start_date, end_date):
         is_single_day = (start_date == end_date)
-        duration    = (datetime.strptime(end_date, '%Y-%m-%d') -
-                       datetime.strptime(start_date, '%Y-%m-%d')).days + 1
-        missing_pct = data.get('missing_pct', 0)
-        missing_str = f"{missing_pct:.1f}%"
-        if missing_pct > 25:
-            missing_str += "  ⚠️ High missing data (out of dataset bounds?)"
+        duration = (datetime.strptime(end_date, '%Y-%m-%d') -
+                    datetime.strptime(start_date, '%Y-%m-%d')).days + 1
 
         if is_single_day:
-            return f"""
-╔════════════════════════════════════════════════════════════════════════╗
-║                     📊 SOIL MOISTURE ANALYSIS                        ║
-╠════════════════════════════════════════════════════════════════════════╣
-║ Region: {region}
-║ Date:   {start_date}
-╠════════════════════════════════════════════════════════════════════════╣
-║                           📈 RESULT                                  ║
-║
-║  Soil Moisture:  {data['mean']:.8f} m³/m³
-║
-║  Data Points:    {data['count']} measurements
-║  Missing Data:   {missing_str}
-╚════════════════════════════════════════════════════════════════════════╝
-"""
-        return f"""
-╔════════════════════════════════════════════════════════════════════════╗
-║                    📊 MEAN SOIL MOISTURE ANALYSIS                    ║
-╠════════════════════════════════════════════════════════════════════════╣
-║ Region:   {region}
-║ Period:   {start_date} to {end_date}
-║ Duration: {duration} days
-╠════════════════════════════════════════════════════════════════════════╣
-║                           📈 RESULT                                  ║
-║
-║  Mean Soil Moisture: {data['mean']:.8f} m³/m³
-║
-║  Data Points:        {data['count']} measurements
-║  Missing Data:       {missing_str}
-╚════════════════════════════════════════════════════════════════════════╝
-"""
+            return (
+                f"**\U0001f4ca Soil Moisture — {region}**\n\n"
+                f"**Date:** {start_date}\n\n"
+                f"---\n\n"
+                f"**Soil Moisture:** `{data['mean']:.6f} m\u00b3/m\u00b3`"
+            )
+        return (
+            f"**\U0001f4ca Mean Soil Moisture — {region}**\n\n"
+            f"**Period:** {start_date} \u2192 {end_date} &nbsp; ({duration} days)\n\n"
+            f"---\n\n"
+            f"**Mean Moisture:** `{data['mean']:.6f} m\u00b3/m\u00b3`"
+        )
 
 
     # ------------------------------------------------------------------
@@ -80,46 +55,26 @@ class OutputFormatter:
         if output_type == 'scalar':
             return OutputFormatter._format_scalar_slope(data, region, start_date, end_date)
         elif output_type == 'map':
-            return "🗺️  Trend map & graph will be generated. Check 'latest_analysis.png'"
+            return ""
         else:
-            result  = OutputFormatter._format_scalar_slope(data, region, start_date, end_date)
-            result += "\n📊 Spatial trend map & temporal graph saved to 'latest_analysis.png'\n"
-            return result
+            return OutputFormatter._format_scalar_slope(data, region, start_date, end_date)
 
     @staticmethod
     def _format_scalar_slope(data, region, start_date, end_date):
         duration     = (datetime.strptime(end_date, '%Y-%m-%d') -
                         datetime.strptime(start_date, '%Y-%m-%d')).days + 1
-        direction    = "📈 INCREASING (Wetter)" if data['slope'] > 0 else "📉 DECREASING (Drier)"
-        significance = ("✅ SIGNIFICANT"
-                        if data['p_value'] < 0.05
-                        else "⚠️  NOT SIGNIFICANT (p ≥ 0.05)")
+        direction    = "\U0001f4c8 Increasing (Getting Wetter)" if data['slope'] > 0 else "\U0001f4c9 Decreasing (Getting Drier)"
+        significance = "\u2705 Statistically Significant" if data['p_value'] < 0.05 else "\u26a0\ufe0f Not Significant (p \u2265 0.05)"
         total_change = data['slope'] * duration
-        return f"""
-╔════════════════════════════════════════════════════════════════════════╗
-║                   📈 SOIL MOISTURE TREND ANALYSIS                    ║
-╠════════════════════════════════════════════════════════════════════════╣
-║ Region:   {region}
-║ Period:   {start_date} to {end_date}
-║ Duration: {duration} days
-╠════════════════════════════════════════════════════════════════════════╣
-║                        🔍 TREND STATISTICS                           ║
-║
-║  Trend Direction:   {direction}
-║  Slope:             {data['slope']:.8f} m³/m³/day
-║  R-squared:         {data['r_squared']:.6f}
-║  P-value:           {data['p_value']:.6f}
-║  Significance:      {significance}
-║
-║  Total Change:      {total_change:.6f} m³/m³ over the period
-╠════════════════════════════════════════════════════════════════════════╣
-║ 📍 INTERPRETATION:
-║    • Positive slope → Soil getting WETTER
-║    • Negative slope → Soil getting DRIER
-║    • P-value < 0.05 → Trend is STATISTICALLY SIGNIFICANT
-║    • P-value ≥ 0.05 → Trend may be DUE TO CHANCE
-╚════════════════════════════════════════════════════════════════════════╝
-"""
+        return (
+            f"**\U0001f4c8 Soil Moisture Trend — {region}**\n\n"
+            f"**Period:** {start_date} \u2192 {end_date} &nbsp; ({duration} days)\n\n"
+            f"---\n\n"
+            f"**Trend:** {direction} &nbsp; {significance}\n\n"
+            f"**Slope:** `{data['slope']:.8f} m\u00b3/m\u00b3/day`\n\n"
+            f"**Total Change:** `{total_change:+.6f} m\u00b3/m\u00b3` over the period\n\n"
+            f"> Positive slope = soil getting wetter &nbsp;|&nbsp; Negative slope = soil getting drier"
+        )
 
     # ------------------------------------------------------------------
     # MINIMUM
@@ -130,36 +85,20 @@ class OutputFormatter:
         if output_type == 'scalar':
             return OutputFormatter._format_scalar_minimum(data, region, start_date, end_date)
         elif output_type == 'map':
-            return "🗺️  Minimum moisture map will be generated. Check 'latest_analysis.png'"
+            return ""
         else:
-            result  = OutputFormatter._format_scalar_minimum(data, region, start_date, end_date)
-            result += "\n📊 Spatial minimum map saved to 'latest_analysis.png'\n"
-            return result
+            return OutputFormatter._format_scalar_minimum(data, region, start_date, end_date)
 
     @staticmethod
     def _format_scalar_minimum(data, region, start_date, end_date):
-        duration    = (datetime.strptime(end_date, '%Y-%m-%d') -
-                       datetime.strptime(start_date, '%Y-%m-%d')).days + 1
-        missing_pct = data.get('missing_pct', 0)
-        missing_str = f"{missing_pct:.1f}%"
-        if missing_pct > 25:
-            missing_str += "  ⚠️ High missing data (out of dataset bounds?)"
-        return f"""
-╔════════════════════════════════════════════════════════════════════════╗
-║                  📉 MINIMUM SOIL MOISTURE ANALYSIS                   ║
-╠════════════════════════════════════════════════════════════════════════╣
-║ Region:   {region}
-║ Period:   {start_date} to {end_date}
-║ Duration: {duration} days
-╠════════════════════════════════════════════════════════════════════════╣
-║                           📈 RESULT                                  ║
-║
-║  Minimum Soil Moisture: {data['min']:.8f} m³/m³  ⚠️  DRIEST VALUE
-║
-║  Data Points:           {data['count']} measurements
-║  Missing Data:          {missing_str}
-╚════════════════════════════════════════════════════════════════════════╝
-"""
+        duration = (datetime.strptime(end_date, '%Y-%m-%d') -
+                    datetime.strptime(start_date, '%Y-%m-%d')).days + 1
+        return (
+            f"**\U0001f4c9 Minimum Soil Moisture — {region}**\n\n"
+            f"**Period:** {start_date} \u2192 {end_date} &nbsp; ({duration} days)\n\n"
+            f"---\n\n"
+            f"**Minimum Moisture:** `{data['min']:.6f} m\u00b3/m\u00b3` &nbsp; \u26a0\ufe0f Driest value"
+        )
 
     # ------------------------------------------------------------------
     # MAXIMUM
@@ -170,36 +109,20 @@ class OutputFormatter:
         if output_type == 'scalar':
             return OutputFormatter._format_scalar_maximum(data, region, start_date, end_date)
         elif output_type == 'map':
-            return "🗺️  Maximum moisture map will be generated. Check 'latest_analysis.png'"
+            return ""
         else:
-            result  = OutputFormatter._format_scalar_maximum(data, region, start_date, end_date)
-            result += "\n📊 Spatial maximum map saved to 'latest_analysis.png'\n"
-            return result
+            return OutputFormatter._format_scalar_maximum(data, region, start_date, end_date)
 
     @staticmethod
     def _format_scalar_maximum(data, region, start_date, end_date):
-        duration    = (datetime.strptime(end_date, '%Y-%m-%d') -
-                       datetime.strptime(start_date, '%Y-%m-%d')).days + 1
-        missing_pct = data.get('missing_pct', 0)
-        missing_str = f"{missing_pct:.1f}%"
-        if missing_pct > 25:
-            missing_str += "  ⚠️ High missing data (out of dataset bounds?)"
-        return f"""
-╔════════════════════════════════════════════════════════════════════════╗
-║                  📈 MAXIMUM SOIL MOISTURE ANALYSIS                   ║
-╠════════════════════════════════════════════════════════════════════════╣
-║ Region:   {region}
-║ Period:   {start_date} to {end_date}
-║ Duration: {duration} days
-╠════════════════════════════════════════════════════════════════════════╣
-║                           📈 RESULT                                  ║
-║
-║  Maximum Soil Moisture: {data['max']:.8f} m³/m³  ⭐ WETTEST VALUE
-║
-║  Data Points:           {data['count']} measurements
-║  Missing Data:          {missing_str}
-╚════════════════════════════════════════════════════════════════════════╝
-"""
+        duration = (datetime.strptime(end_date, '%Y-%m-%d') -
+                    datetime.strptime(start_date, '%Y-%m-%d')).days + 1
+        return (
+            f"**\U0001f4c8 Maximum Soil Moisture — {region}**\n\n"
+            f"**Period:** {start_date} \u2192 {end_date} &nbsp; ({duration} days)\n\n"
+            f"---\n\n"
+            f"**Maximum Moisture:** `{data['max']:.6f} m\u00b3/m\u00b3` &nbsp; \u2b50 Wettest value"
+        )
 
     # ==================================================================
     # COMPARISON — SHARED WINNER LOGIC
@@ -316,14 +239,11 @@ class OutputFormatter:
         output_type   : str  ('scalar'|'map'|'both')
         """
         if output_type == 'map':
-            return "🗺️  Comparison maps will be generated. Check 'latest_analysis.png'"
+            return ""
 
         scalar_block = OutputFormatter._format_scalar_n_periods(
             values, period_labels, region, metric
         )
-
-        if output_type == 'both':
-            scalar_block += "\n📊 Comparison maps saved to 'latest_analysis.png'\n"
 
         return scalar_block
 
@@ -333,42 +253,19 @@ class OutputFormatter:
         _, _, _, winner_summary, badges = OutputFormatter._pick_winner_n(
             values, period_labels, metric
         )
+        unit_map = {'mean': 'm³/m³', 'min': 'm³/m³', 'max': 'm³/m³', 'slope': 'm³/m³/day'}
+        unit = unit_map.get(metric, 'm³/m³')
 
-        unit_map = {
-            'mean':  'm³/m³',
-            'min':   'm³/m³',
-            'max':   'm³/m³',
-            'slope': 'm³/m³/day',
-        }
-        unit  = unit_map.get(metric, 'm³/m³')
-        width = 72
-
-        lines = []
-        lines.append("╔" + "═" * width + "╗")
-        lines.append(
-            f"║{'🔄 SOIL MOISTURE COMPARISON  ({} PERIODS)'.format(n).center(width)}║"
-        )
-        lines.append("╠" + "═" * width + "╣")
-        lines.append(f"║  Region : {region:<{width-11}}║")
-        lines.append(f"║  Metric : {metric.upper():<{width-11}}║")
-        lines.append("╠" + "═" * width + "╣")
-
+        lines = [f"**🔄 Soil Moisture Comparison — {region}** ({metric.upper()})\n"]
+        lines.append("---\n")
         for i, (lbl, val) in enumerate(zip(period_labels, values), 1):
-            badge   = badges[i-1]
-            # Flatten multi-line label
-            flat_lbl = lbl.replace('\n', '  |  ')
-            badge_str = f"  [{badge}]" if badge else ""
-            val_str   = f"{val:.6f} {unit}" if not (isinstance(val, float) and np.isnan(val)) else "N/A"
-            lines.append(f"║  Period {i}: {flat_lbl}{badge_str}")
-            lines.append(f"║    {metric.capitalize():8s}: {val_str}")
-            if i < n:
-                lines.append("║")
-
-        lines.append("╠" + "═" * width + "╣")
-        lines.append(f"║  🏆 RESULT: {winner_summary}")
-        lines.append("╚" + "═" * width + "╝")
-
-        return "\n".join(lines) + "\n"
+            badge = badges[i - 1]
+            flat_lbl = lbl.replace('\n', ' | ')
+            val_str = f"`{val:.6f} {unit}`" if not (isinstance(val, float) and np.isnan(val)) else "`N/A`"
+            badge_str = f" &nbsp; **{badge}**" if badge else ""
+            lines.append(f"**Period {i}:** {flat_lbl}  →  {val_str}{badge_str}\n")
+        lines.append(f"\n🏆 **Result:** {winner_summary}")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # COMPARISON — 2 TIME PERIODS  (back-compat, delegates to N-period)
@@ -396,43 +293,30 @@ class OutputFormatter:
                 data, region1, region2, start_date, end_date, metric_label
             )
         elif output_type == 'map':
-            return ("🗺️  Regional comparison maps will be generated. "
-                    "Check 'latest_analysis.png'")
+            return ""
         else:
-            result  = OutputFormatter._format_scalar_comparison_region(
+            return OutputFormatter._format_scalar_comparison_region(
                 data, region1, region2, start_date, end_date, metric_label
             )
-            result += "\n📊 Regional comparison maps saved to 'latest_analysis.png'\n"
-            return result
 
     @staticmethod
     def _format_scalar_comparison_region(data, region1, region2,
                                           start_date, end_date, metric_label):
         value1 = data['value1']
         value2 = data['value2']
-
         winner, m1, m2 = OutputFormatter._pick_winner(
             value1, value2, region1, region2, metric_label
         )
-        m1_str = f"  [{m1}]" if m1 else ""
-        m2_str = f"  [{m2}]" if m2 else ""
-
-        return f"""
-╔════════════════════════════════════════════════════════════════════════╗
-║              🔄 SOIL MOISTURE COMPARISON (REGIONS)                   ║
-╠════════════════════════════════════════════════════════════════════════╣
-║ Period:  {start_date} to {end_date}
-║ Metric:  {metric_label.upper()}
-╠════════════════════════════════════════════════════════════════════════╣
-║  Region 1: {region1}{m1_str}
-║  {metric_label.capitalize()}: {value1:.6f} m³/m³
-║
-║  Region 2: {region2}{m2_str}
-║  {metric_label.capitalize()}: {value2:.6f} m³/m³
-╠════════════════════════════════════════════════════════════════════════╣
-║  🏆 RESULT: {winner}
-╚════════════════════════════════════════════════════════════════════════╝
-"""
+        m1_badge = f" &nbsp; **{m1}**" if m1 else ""
+        m2_badge = f" &nbsp; **{m2}**" if m2 else ""
+        return (
+            f"**🔄 Regional Comparison — {metric_label.upper()}**\n\n"
+            f"**Period:** {start_date} → {end_date}\n\n"
+            f"---\n\n"
+            f"**{region1}:** `{value1:.6f} m³/m³`{m1_badge}\n\n"
+            f"**{region2}:** `{value2:.6f} m³/m³`{m2_badge}\n\n"
+            f"🏆 **Result:** {winner}"
+        )
 
 
 # ============================================================================
