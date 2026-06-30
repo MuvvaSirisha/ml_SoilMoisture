@@ -25,10 +25,8 @@ from engine import SM_Engine
 from agent import OllamaAgent
 from Query_classifier import QueryClassifier
 from utils import QueryValidator, DateAnalyzer, get_unique_viz_filename
-from literature_manager import LiteratureManager
-from literature_qa import answer_from_literature, get_literature_context, parse_literature_command
 from intent_classifier import classify_query_intent
-from main import _resolve_lit_path, _setup_literature, sanitise_input, split_queries, get_dataset_bounds, build_comparison_info, check_date_bounds, _apply_date_correction
+from main import sanitise_input, split_queries, get_dataset_bounds, build_comparison_info, check_date_bounds, _apply_date_correction
 from guardrails import QueryGuard
 
 # ============================================================================
@@ -39,7 +37,7 @@ st.set_page_config(page_title="Soil Moisture Intelligence Engine", page_icon="�
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! 👋 I am your Soil Moisture Intelligence Engine.\n\nYou can ask me to analyze datasets (e.g. *\"Show moisture trend in Punjab in 2022\"*), search scientific literature, or we can just chat!"}
+        {"role": "assistant", "content": "Hello! 👋 I am your Soil Moisture Intelligence Engine.\n\nYou can ask me to analyze soil moisture datasets (e.g. *\"Show moisture trend in Punjab in 2022\"*) or we can just chat!"}
     ]
 
 # ============================================================================
@@ -48,30 +46,34 @@ if "messages" not in st.session_state:
 
 @st.cache_resource(show_spinner=True)
 def load_system():
-    engine     = SM_Engine()
+    try:
+        engine = SM_Engine()
+    except FileNotFoundError as e:
+        # Service account JSON key is missing
+        raise RuntimeError(
+            "Google Drive credentials not found.\n\n"
+            "Please ensure `cloud/service_account.json` exists and "
+            "`GOOGLE_SERVICE_ACCOUNT_KEY` is set correctly in your `.env` file.\n\n"
+            f"Detail: {e}"
+        ) from e
+    except Exception as e:
+        err_str = str(e).lower()
+        if "credentials" in err_str or "service_account" in err_str or "authentication" in err_str:
+            raise RuntimeError(
+                "Google Drive authentication failed.\n\n"
+                "Check that `cloud/service_account.json` is a valid service account key "
+                "with Google Drive access enabled.\n\n"
+                f"Detail: {e}"
+            ) from e
+        raise  # re-raise unknown errors as-is
+
     classifier = QueryClassifier()
     agent      = OllamaAgent(model_name=Config.OLLAMA_MODEL)
     validator  = QueryValidator()
 
-    lit_index_path = _resolve_lit_path(Config.LITERATURE_INDEX_PATH)
-
-    try:
-        from cloud.literature_manager import sync_literature
-        lit_dir = sync_literature()
-    except Exception as e:
-        lit_dir = _resolve_lit_path(Config.LITERATURE_DIR)
-
-    lit_manager = LiteratureManager(
-        index_path        = lit_index_path,
-        vision_enabled    = Config.VISION_ENABLED,
-        vision_cache_dir  = Config.VISION_IMAGE_CACHE_DIR,
-        vision_max_images = Config.VISION_MAX_IMAGES_PER_PDF,
-    )
-    _setup_literature(lit_manager, lit_dir)
-
     ds_start, ds_end = get_dataset_bounds(engine)
 
-    return engine, classifier, agent, validator, lit_manager, ds_start, ds_end
+    return engine, classifier, agent, validator, ds_start, ds_end
 
 
 # ============================================================================
@@ -108,7 +110,7 @@ def get_base64_of_file(file_path):
         return ""
 
 
-def process_query_in_app(query, engine, classifier, agent, validator, ds_start, ds_end, lit_manager, intent):
+def process_query_in_app(query, engine, classifier, agent, validator, ds_start, ds_end, intent):
     cls = classifier.classify(query)
 
     if cls.get("query_clarity") in ["unclear", "ambiguous"]:
@@ -171,7 +173,6 @@ def process_query_in_app(query, engine, classifier, agent, validator, ds_start, 
             comparison_info = comp_info,
         )
 
-        lit_findings = ""
 
         viz_filename = None
         if viz_created:
@@ -186,7 +187,6 @@ def process_query_in_app(query, engine, classifier, agent, validator, ds_start, 
         results.append({
             "message":    result_msg,
             "viz":        viz_filename,
-            "literature": lit_findings
         })
         return {"results": results}
 
@@ -212,7 +212,6 @@ def process_query_in_app(query, engine, classifier, agent, validator, ds_start, 
             output_type = cls["output_type"],
         )
 
-        lit_findings = ""
 
         viz_filename = None
         if viz_created:
@@ -227,7 +226,6 @@ def process_query_in_app(query, engine, classifier, agent, validator, ds_start, 
         results.append({
             "message":    result_msg,
             "viz":        viz_filename,
-            "literature": lit_findings
         })
         return {"results": results}
 
@@ -257,20 +255,12 @@ def process_query_in_app(query, engine, classifier, agent, validator, ds_start, 
                 except Exception as copy_err:
                     print(f"⚠️ Could not copy visualization: {copy_err}")
                     viz_filename = "latest_analysis.png"
-
             results.append({
                 "message":    f"**Range: {s} to {e}**\n\n" + result_msg,
                 "viz":        viz_filename,
-                "literature": ""
             })
 
-        lit_findings = ""
-        if intent == "both" and lit_manager and lit_manager.list_sources():
-            lit_ctx, lit_found = get_literature_context(query, lit_manager, top_k=3)
-            if lit_found:
-                lit_findings = lit_ctx
-        if lit_findings and results:
-            results[-1]["literature"] = lit_findings
+
 
         return {"results": results}
 
@@ -283,11 +273,10 @@ def chat_with_llm(messages, ollama_url, ollama_model, ds_start=None, ds_end=None
         "You are 'Soil Moisture Intelligence Engine', a helpful and friendly AI assistant for a Soil Moisture Analysis application. "
         "If asked about your name, you must introduce yourself as the 'Soil Moisture Intelligence Engine'. "
         "If a user asks you to change your name, persona, or behavior, politely decline and state that your identity cannot be changed. "
-        "If a user asks about data other than what is present (e.g., regions outside India, or topics outside soil moisture), politely tell them that data is not available for those queries and you can only answer questions about the available soil moisture datasets and literature. "
+        "If a user asks about data other than what is present (e.g., regions outside India, or topics outside soil moisture), politely tell them that data is not available for those queries and you can only answer questions about the available soil moisture datasets. "
         "If asked what you can do, explain that you can: "
         "1. Analyze soil moisture datasets (e.g., mean, minimum, maximum, and trends) across regions. "
-        "2. Answer questions from scientific literature and research papers. "
-        "3. Compare data between different regions and time periods. "
+        "2. Compare data between different regions and time periods. "
         "Keep responses concise, natural, and helpful."
     )
     if ds_start and ds_end:
@@ -346,7 +335,7 @@ def chat_with_llm(messages, ollama_url, ollama_model, ds_start=None, ds_end=None
 # DASHBOARD TAB
 # ============================================================================
 
-def _render_dashboard_tab(engine, ds_start, ds_end, lit_manager):
+def _render_dashboard_tab(engine, ds_start, ds_end):
     if not _PLOTLY_OK:
         st.error("Plotly / Pandas not installed. Run: `pip install plotly pandas`")
         return
@@ -365,7 +354,6 @@ def _render_dashboard_tab(engine, ds_start, ds_end, lit_manager):
         global_mean = None
 
     n_regions = len(engine.available_regions)
-    n_lit     = len(lit_manager.list_sources())
 
     with c1:
         st.metric("🌊 Global Mean",
@@ -377,7 +365,7 @@ def _render_dashboard_tab(engine, ds_start, ds_end, lit_manager):
         st.metric("📅 Span", f"{span_days} days",
                   help=f"{n_timesteps} time-steps  |  {ds_start} → {ds_end}")
     with c4:
-        st.metric("📚 Literature", str(n_lit), help="Loaded scientific papers")
+        st.metric("📅 Time Steps", str(n_timesteps), help=f"Daily observations | {ds_start} → {ds_end}")
 
     st.divider()
 
@@ -679,8 +667,15 @@ def _render_gee_smap_tab(engine=None, ds_start=None, ds_end=None):
         )
         return
 
-    # ── Auto-initialize GEE with hardcoded project ID ────────────────────────
-    _GEE_PROJECT_ID = "soil-moisture-agent"
+    # ── Initialize GEE — project ID from Config (set via .env) ──────────────
+    _GEE_PROJECT_ID = Config.GEE_PROJECT_ID
+    if not _GEE_PROJECT_ID:
+        st.error(
+            "⚠️ **GEE Project ID not configured.**\n\n"
+            "Set `GOOGLE_CLOUD_PROJECT=your-gcp-project-id` in your `.env` file "
+            "and restart the app."
+        )
+        return
 
     if not st.session_state.get("gee_initialised"):
         with st.spinner("Connecting to Google Earth Engine…"):
@@ -835,7 +830,8 @@ def _render_gee_smap_tab(engine=None, ds_start=None, ds_end=None):
         st.warning(f"Plot generation failed: {st.session_state['gee_plot_error']}")
 
     has_results = (
-        "gee_plot_path" in st.session_state
+        "gee_plot_path" in st.session_state or
+        "gee_df"        in st.session_state
     )
 
     if has_results:
@@ -877,8 +873,45 @@ def _render_gee_smap_tab(engine=None, ds_start=None, ds_end=None):
         else:
             st.info("AMSR data was not compared, or no overlapping pixels were found.")
 
+        # ── Daily time-series chart ───────────────────────────────────────────
+        df_gee = st.session_state.get("gee_df")
+        if df_gee is not None and not df_gee.empty:
+            st.markdown("### 📈 Daily SMAP Time-Series")
+            import plotly.express as px
+            ts_col = [c for c in df_gee.columns if c != "Date"]
+            if ts_col:
+                fig_ts = px.line(
+                    df_gee, x="Date", y=ts_col[0],
+                    title=f"Daily SMAP Soil Moisture — {meta.get('region', '')} "
+                          f"({meta.get('start', '')} → {meta.get('end', '')})",
+                    labels={ts_col[0]: ts_col[0], "Date": "Date"},
+                    markers=len(df_gee) < 200,
+                )
+                fig_ts.update_layout(
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font_color="#e2e8f0",
+                    xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.08)"),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.08)"),
+                )
+                st.plotly_chart(fig_ts, use_container_width=True)
+
+            csv_bytes = df_gee.to_csv(index=False).encode()
+            st.download_button(
+                label="⬇️ Download time-series CSV",
+                data=csv_bytes,
+                file_name=(
+                    f"smap_ts_{meta.get('region','india').replace(' ','_')}_"
+                    f"{meta.get('start','')}_{meta.get('end','')}.csv"
+                ),
+                mime="text/csv",
+                key="gee_ts_dl",
+            )
+
+
         plot_path = st.session_state.get("gee_plot_path")
         if plot_path and os.path.isfile(plot_path):
+
             st.markdown("### 🗺️ Spatial Comparison Map")
             n_panels = 3 if metrics.get("amsr_mean") is not None else 1
             caption  = (
@@ -901,6 +934,182 @@ def _render_gee_smap_tab(engine=None, ds_start=None, ds_end=None):
         else:
             if not st.session_state.get("gee_plot_error"):
                 st.info("ℹ️ Spatial map not generated yet — click **☁️ Fetch & Plot**.")
+
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # METRIC TREND ANALYSIS  (always visible, independent of Fetch & Plot)
+    # ──────────────────────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### \U0001f4c9 Metric Trend Analysis")
+    st.caption(
+        "Computes SMAP validation metrics (Bias, RMSE, Pearson R, SMAP Mean, AMSR Mean) "
+        "across multiple sub-periods and applies **Mann-Kendall + Sen slope** trend tests "
+        "\u2014 the same method used for AMSR satellite trend analysis."
+    )
+
+    tr1, tr2, tr3, tr4 = st.columns([1, 1, 1, 1])
+    _gee_min_trend = datetime.date(2015, 4, 1)
+    _gee_max_trend = datetime.date.today()
+    with tr1:
+        trend_start = st.date_input(
+            "Trend start", value=datetime.date(2018, 1, 1),
+            min_value=_gee_min_trend, max_value=_gee_max_trend,
+            key="gee_trend_start"
+        )
+    with tr2:
+        trend_end = st.date_input(
+            "Trend end", value=datetime.date(2023, 12, 31),
+            min_value=_gee_min_trend, max_value=_gee_max_trend,
+            key="gee_trend_end"
+        )
+    with tr3:
+        trend_interval = st.selectbox(
+            "Interval",
+            ["Yearly", "Semi-annual", "Quarterly"],
+            index=0, key="gee_trend_interval",
+            help="Each interval becomes one data point in the trend chart."
+        )
+    with tr4:
+        trend_band = st.selectbox(
+            "SMAP Band (trend)",
+            options=list(BAND_LABELS.keys()),
+            format_func=lambda b: BAND_LABELS[b],
+            index=0, key="gee_trend_band"
+        )
+
+    tr_amsr_op = "mean"
+    if amsr_available:
+        tr_amsr_op = st.selectbox(
+            "AMSR aggregation (trend)",
+            ["mean", "minimum", "maximum"],
+            key="gee_trend_amsr_op"
+        )
+
+    trend_btn_col, trend_clear_col = st.columns([1, 5])
+    with trend_btn_col:
+        run_trend_btn = st.button(
+            "\U0001f4c9 Run Trend Analysis", type="primary", key="gee_trend_btn"
+        )
+    with trend_clear_col:
+        if st.button("\U0001f5d1\ufe0f Clear trend", key="gee_trend_clear"):
+            for _k in ["gee_trend_df", "gee_trend_mk",
+                       "gee_trend_region", "gee_trend_interval_val"]:
+                st.session_state.pop(_k, None)
+            st.rerun()
+
+    if run_trend_btn:
+        if trend_start >= trend_end:
+            st.error("\u274c Trend start must be before trend end.")
+        elif not amsr_available:
+            st.warning(
+                "\u26a0\ufe0f AMSR data not loaded \u2014 "
+                "metric trend requires AMSR for Bias/RMSE/R comparison."
+            )
+        else:
+            _interval_months = {"Yearly": 12, "Semi-annual": 6, "Quarterly": 3}[trend_interval]
+            _periods = []
+            _cur = datetime.date(trend_start.year, trend_start.month, 1)
+            while _cur <= trend_end:
+                _per_start = _cur
+                _end_month = _cur.month + _interval_months - 1
+                _end_year  = _cur.year + (_end_month - 1) // 12
+                _end_month = (_end_month - 1) % 12 + 1
+                import calendar as _cal
+                _last_day  = _cal.monthrange(_end_year, _end_month)[1]
+                _per_end   = datetime.date(_end_year, _end_month, _last_day)
+                if _per_end > trend_end:
+                    _per_end = trend_end
+                _periods.append((_per_start, _per_end))
+                _nm  = _cur.month + _interval_months
+                _cur = datetime.date(_cur.year + (_nm - 1) // 12, (_nm - 1) % 12 + 1, 1)
+
+            if len(_periods) < 2:
+                st.warning(
+                    "\u26a0\ufe0f Need at least 2 sub-periods. "
+                    "Extend the date range or use a shorter interval."
+                )
+            else:
+                _meta_tr    = st.session_state.get("gee_meta", {})
+                _trend_reg  = _meta_tr.get("region", gee_region)
+                _prog       = st.progress(0, text="Fetching grids for spatial trend\u2026")
+                _grids      = []
+                _lats       = None
+                _lons       = None
+                _years      = []
+
+                for _pi, (_ps, _pe) in enumerate(_periods):
+                    _ps_str = str(_ps)
+                    _pe_str = str(_pe)
+                    try:
+                        _sp_res, _sp_err = get_smap_spatial_grid_gee(
+                            start_date=_ps_str, end_date=_pe_str,
+                            region_name=_trend_reg, band=trend_band
+                        )
+                        if not _sp_err and _sp_res is not None:
+                            _grids.append(_sp_res["smap_grid"])
+                            if _lats is None:
+                                _lats = _sp_res["lats"]
+                                _lons = _sp_res["lons"]
+                            _years.append(_ps.year)
+                    except Exception:
+                        pass
+                    _prog.progress((_pi + 1) / len(_periods),
+                                   text=f"Period {_pi+1}/{len(_periods)}: {_ps_str}")
+
+                _prog.empty()
+
+                if len(_grids) >= 2:
+                    st.session_state["gee_trend_grids"] = _grids
+                    st.session_state["gee_trend_lats"] = _lats
+                    st.session_state["gee_trend_lons"] = _lons
+                    st.session_state["gee_trend_years"] = _years
+                    st.session_state["gee_trend_region"] = _trend_reg
+                    st.session_state["gee_trend_map_start"] = _periods[0][0].year
+                    st.session_state["gee_trend_map_end"] = _periods[-1][1].year
+                else:
+                    st.warning("\u26a0\ufe0f Not enough valid periods to compute spatial trend. Try a longer date range.")
+
+    # \u2500\u2500 Render trend results \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    if "gee_trend_grids" in st.session_state:
+        _grids    = st.session_state["gee_trend_grids"]
+        _lats     = st.session_state["gee_trend_lats"]
+        _lons     = st.session_state["gee_trend_lons"]
+        _years    = st.session_state["gee_trend_years"]
+        _tr_reg   = st.session_state["gee_trend_region"]
+        _tr_start = st.session_state["gee_trend_map_start"]
+        _tr_end   = st.session_state["gee_trend_map_end"]
+
+        import xarray as xr
+        import numpy as np
+
+        st.markdown(f"#### \U0001f5fa\ufe0f Spatial Trend Map ({_tr_start}\u2013{_tr_end})")
+        with st.spinner("Computing pixel-wise Sen's slope and Mann-Kendall significance..."):
+            _stacked = np.stack(_grids, axis=0)
+            _da = xr.DataArray(
+                _stacked,
+                coords={"year": np.arange(len(_grids)), "lat": _lats, "lon": _lons},
+                dims=["year", "lat", "lon"]
+            )
+            
+            from engine import _compute_spatial_slope_and_pval
+            _sp_slope, _sp_pval = _compute_spatial_slope_and_pval(_da)
+            
+            _map_path = engine.visualize_trend_map_only(
+                spatial_slope=_sp_slope, pval=_sp_pval,
+                start_year=_tr_start, end_year=_tr_end,
+                display_region=_tr_reg, raw_region=_tr_reg
+            )
+            
+        if _map_path:
+            st.image(_map_path, use_column_width=True)
+            with open(_map_path, "rb") as f:
+                st.download_button(
+                    label="\u2b07\ufe0f Download Trend Map",
+                    data=f,
+                    file_name=f"smap_trend_map_{_tr_reg.replace(' ','_').lower()}_{_tr_start}_{_tr_end}.png",
+                    mime="image/png",
+                    key="gee_trend_map_dl",
+                )
 
     st.divider()
     with st.expander("ℹ️ About this tab & GEE SMAP collection", expanded=False):
@@ -943,7 +1152,7 @@ https://console.cloud.google.com/apis/library/earthengine.googleapis.com
 # CONVERSATIONAL FOLLOW-UP HELPERS
 # ============================================================================
 
-def _run_cls_analysis(cls, engine, validator, lit_manager,
+def _run_cls_analysis(cls, engine, validator,
                        ds_start, ds_end, original_query, intent):
     """
     Execute analysis from an already-classified cls dict.
@@ -1025,13 +1234,7 @@ def _run_cls_analysis(cls, engine, validator, lit_manager,
             except Exception:
                 viz_filename = "latest_analysis.png"
 
-        lit_findings = ""
-        if intent == "both" and lit_manager and lit_manager.list_sources():
-            lit_ctx, lit_found = get_literature_context(original_query, lit_manager, top_k=3)
-            if lit_found:
-                lit_findings = lit_ctx
-
-        results.append({"message": result_msg, "viz": viz_filename, "literature": lit_findings})
+        results.append({"message": result_msg, "viz": viz_filename})
         return {"results": results}
 
     # -- NON-COMPARISON: single or multi-range --------------------------------
@@ -1067,13 +1270,7 @@ def _run_cls_analysis(cls, engine, validator, lit_manager,
             except Exception:
                 viz_filename = "latest_analysis.png"
 
-        lit_findings = ""
-        if intent == "both" and lit_manager and lit_manager.list_sources():
-            lit_ctx, lit_found = get_literature_context(original_query, lit_manager, top_k=3)
-            if lit_found:
-                lit_findings = lit_ctx
-
-        results.append({"message": result_msg, "viz": viz_filename, "literature": lit_findings})
+        results.append({"message": result_msg, "viz": viz_filename})
         return {"results": results}
 
     else:
@@ -1100,20 +1297,10 @@ def _run_cls_analysis(cls, engine, validator, lit_manager,
                     shutil.copy("latest_analysis.png", viz_filename)
                 except Exception:
                     viz_filename = "latest_analysis.png"
-
             results.append({
                 "message":    f"**Range: {s} to {e}**\n\n" + result_msg,
                 "viz":        viz_filename,
-                "literature": "",
             })
-
-        lit_findings = ""
-        if intent == "both" and lit_manager and lit_manager.list_sources():
-            lit_ctx, lit_found = get_literature_context(original_query, lit_manager, top_k=3)
-            if lit_found:
-                lit_findings = lit_ctx
-        if lit_findings and results:
-            results[-1]["literature"] = lit_findings
 
         return {"results": results}
 def _build_follow_up_question(need_info: str, cls: dict) -> str:
@@ -1205,7 +1392,7 @@ def _is_smap_cloud_query(query: str) -> bool:
 # ============================================================================
 
 def _process_pending_prompt(prompt, engine, classifier, agent, validator,
-                             ds_start, ds_end, lit_manager):
+                             ds_start, ds_end):
     with st.chat_message("assistant"):
         clean_prompt = sanitise_input(prompt)
 
@@ -1249,7 +1436,7 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
 
             with st.spinner("📊 Running analysis with your answer..."):
                 combined_query = pending.get("original_query", clean_prompt)
-                res = _run_cls_analysis(merged_cls, engine, validator, lit_manager,
+                res = _run_cls_analysis(merged_cls, engine, validator,
                                         ds_start, ds_end, combined_query, "dataset")
 
             full_response_parts = []
@@ -1280,11 +1467,6 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
 
                     if r.get("viz") and os.path.isfile(r["viz"]):
                         display_images.append(r["viz"])
-                    if r.get("literature"):
-                        lit_findings = "### 📚 Literature Findings\n" + r["literature"] + "\n\n"
-                        st.markdown(lit_findings)
-                        full_response_parts.append(lit_findings)
-
             for img in display_images:
                 img_basename = os.path.basename(img)
                 clean_name = " ".join(img_basename.split("_")[:2]).title()
@@ -1298,16 +1480,9 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
             return
         # ── End pending query block ───────────────────────────────────────
 
-        lit_cmd_result = parse_literature_command(clean_prompt, lit_manager)
-        if lit_cmd_result is not None:
-            st.markdown(lit_cmd_result)
-            st.session_state.messages.append({"role": "assistant", "content": lit_cmd_result})
-            return
-
         sub_queries         = split_queries(clean_prompt)
         full_response_parts = []
         display_images      = []
-        has_literature      = bool(lit_manager.list_sources())
 
         for sq in sub_queries:
             with st.spinner("🔍 Analysing your query..."):
@@ -1328,54 +1503,14 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                 )
                 full_response_parts.append(streamed or "")
 
-            elif intent in ("literature", "both"):
-                lit_query = sq
-                dataset_q_for_both = sq
-                if intent == "both":
-                    from utils import split_both_query_with_llm
-                    dataset_q_for_both, lit_query = split_both_query_with_llm(
-                        sq, Config.OLLAMA_URL, Config.OLLAMA_MODEL, Config.OLLAMA_TIMEOUT
-                    )
-                
-                if has_literature:
-                    with st.spinner("📖 Searching literature..."):
-                        answer, found_in_lit, image_display_list = answer_from_literature(
-                            query          = lit_query,
-                            lit_manager    = lit_manager,
-                            ollama_url     = Config.OLLAMA_URL,
-                            ollama_model   = Config.OLLAMA_MODEL,
-                            ollama_timeout = Config.OLLAMA_TIMEOUT,
-                            top_k          = Config.LITERATURE_TOP_K,
-                            vision_model   = Config.VISION_MODEL,
-                            vision_timeout = Config.VISION_TIMEOUT,
-                            vision_top_k   = Config.VISION_TOP_K,
-                            vision_enabled = Config.VISION_ENABLED,
-                        )
-                    if answer:
-                        lit_text = "### 📖 Literature Answer\n" + answer + "\n\n"
-                        st.markdown(lit_text)
-                        full_response_parts.append(lit_text)
-                        for dd in (image_display_list or []):
-                            path = dd.get("path", "")
-                            if path and os.path.isfile(path):
-                                display_images.append(path)
-                    else:
-                        msg_no_lit = "❓ No relevant passages, figures, or tables found in literature.\n\n"
-                        st.markdown(msg_no_lit)
-                        full_response_parts.append(msg_no_lit)
-                else:
-                    msg_no_lit = "📚 No literature loaded. Please load PDFs via the sidebar.\n\n"
-                    st.markdown(msg_no_lit)
-                    full_response_parts.append(msg_no_lit)
-
-            if intent in ("dataset", "both"):
-                # dataset_q_for_both is set by the literature block above for "both" intent
-                _ds_q = dataset_q_for_both if intent == "both" and "dataset_q_for_both" in dir() else sq
+            if intent == "dataset":
+                # dataset_q is the sub-query to analyse
+                _ds_q = sq
                 with st.spinner("📊 Fetching dataset..."):
                     res = process_query_in_app(
                         _ds_q, engine, classifier, agent,
                         validator, ds_start, ds_end,
-                        lit_manager, intent
+                        intent
                     )
 
                 if "need_info" in res:
@@ -1404,10 +1539,7 @@ def _process_pending_prompt(prompt, engine, classifier, agent, validator,
                             full_response_parts.append(msg)
                         if r.get("viz") and os.path.isfile(r["viz"]):
                             display_images.append(r["viz"])
-                        if r.get("literature"):
-                            lit_findings = "### 📚 Literature Findings\n" + r["literature"] + "\n\n"
-                            st.markdown(lit_findings)
-                            full_response_parts.append(lit_findings)
+
 
         for img in display_images:
             # Extract just "Analysis Mean" or "Analysis Trend" from the filename
@@ -1431,10 +1563,15 @@ st.title("🌍 Soil Moisture Intelligence Engine")
 
 with st.spinner("Initializing System and Syncing Data..."):
     try:
-        engine, classifier, agent, validator, lit_manager, ds_start, ds_end = load_system()
+        engine, classifier, agent, validator, ds_start, ds_end = load_system()
         system_ready = True
+    except RuntimeError as e:
+        # Friendly error from load_system (e.g. missing credentials)
+        st.error(str(e))
+        st.info("💡 **Fix:** Ensure `cloud/service_account.json` exists and `.env` is configured, then restart the app.")
+        system_ready = False
     except Exception as e:
-        st.error(f"Error initializing system: {e}")
+        st.error(f"Unexpected error initializing system: {e}")
         st.code(traceback.format_exc())
         system_ready = False
 
@@ -1444,17 +1581,7 @@ if system_ready:
         st.success("✅ System Ready")
         st.info(f"**Dataset Coverage:**\n\n{ds_start} → {ds_end}")
 
-        src_details = lit_manager.list_sources_with_paths()
-        if src_details:
-            st.markdown("**📚 Literature Loaded:**")
-            for sd in src_details:
-                b64 = get_base64_of_file(sd['full_path'])
-                href = f"data:application/pdf;base64,{b64}" if b64 else "#"
-                link_html = f"<a href='{href}' download='{sd['filename']}' style='color:#4ade80; text-decoration:none;' target='_blank'>📄 {sd['title']}</a>"
-                st.markdown(f"- {link_html}  \n  <small style='color:#94a3b8'>{sd['filename']}</small>",
-                            unsafe_allow_html=True)
-        else:
-            st.warning("No literature loaded.")
+
 
         smap_cache = r"cache\smap"
         if os.path.isdir(smap_cache):
@@ -1477,11 +1604,6 @@ if system_ready:
         - "Compare Rajasthan and Gujarat in 2021"
         - "Show moisture trend in Punjab during monsoon 2022"
 
-        **Literature:**
-        - "Explain AMSR2 retrieval algorithm"
-        - "What RMSE was reported for AMSR2 validation?"
-        - "Show me figure 3"
-
         **Cloud SMAP (GEE):**
         - Use the ☁️ Cloud SMAP tab for multi-year queries without downloads
         ''')
@@ -1502,33 +1624,6 @@ if system_ready:
 
     with tab1:
         if len(st.session_state.messages) <= 1:
-            src_details = lit_manager.list_sources_with_paths()
-            sources_list_html = ""
-            if src_details:
-                items_html = []
-                for sd in src_details:
-                    b64 = get_base64_of_file(sd['full_path'])
-                    href = f"data:application/pdf;base64,{b64}" if b64 else "#"
-                    items_html.append(
-                        f"<li>"
-                        f"<a href='{href}' download='{sd['filename']}' "
-                        f"style='color:#4ade80; text-decoration:underline;' target='_blank'>{sd['title']}</a>"
-                        f"<br><span style='font-size:0.75rem; color:#64748b;'>{sd['filename']}</span>"
-                        f"</li>"
-                    )
-                items_html_str = "".join(items_html)
-                sources_list_html = (
-                    "<div style='margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;'>"
-                    "<span style='font-size: 0.85rem; font-weight: 600; color: #4ade80;'>Loaded Journals &amp; Literature:</span>"
-                    "<ul style='margin: 5px 0 0 0; padding-left: 20px; font-size: 0.85rem; color: #cbd5e1; list-style-type: square;'>"
-                    + items_html_str +
-                    "</ul></div>"
-                )
-            else:
-                sources_list_html = (
-                    "<div style='margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; font-size: 0.85rem; color: #f87171;'>"
-                    "No literature loaded.</div>"
-                )
 
             st.markdown(
                 f"""
@@ -1608,17 +1703,16 @@ if system_ready:
                         </div>
                     </div>
                     <div class="capability-card">
-                        <div class="capability-icon">📚</div>
-                        <div class="capability-title">Scientific Literature &amp; Vision Q&amp;A</div>
+                        <div class="capability-icon">☁️</div>
+                        <div class="capability-title">Live NASA SMAP via GEE</div>
                         <div class="capability-desc">
-                            I search through scientific publications, retrieve tables/figures, and analyze methodology charts or validation plots using our visual intelligence engine to answer complex physical soil science questions.
+                            Stream live NASA SMAP 9km satellite data directly from Google Earth Engine — no downloads needed. Generates 3-panel spatial validation maps comparing AMSR vs SMAP with Bias, RMSE, and Pearson R metrics.
                         </div>
-                        {sources_list_html}
                         <div class="capabilities-tags" style="margin-top: 15px;">
-                            <span class="capability-tag">Paper Semantics</span>
-                            <span class="capability-tag">Figure Extraction</span>
-                            <span class="capability-tag">Visual Q&amp;A</span>
-                            <span class="capability-tag">Table Reader</span>
+                            <span class="capability-tag">Satellite Data</span>
+                            <span class="capability-tag">Spatial Maps</span>
+                            <span class="capability-tag">Validation Metrics</span>
+                            <span class="capability-tag">Multi-year</span>
                         </div>
                     </div>
                 </div>
@@ -1646,11 +1740,11 @@ if system_ready:
             del st.session_state["pending_prompt"]
             _process_pending_prompt(
                 _prompt_to_process, engine, classifier, agent, validator,
-                ds_start, ds_end, lit_manager
+                ds_start, ds_end
             )
 
     with tab2:
-        _render_dashboard_tab(engine, ds_start, ds_end, lit_manager)
+        _render_dashboard_tab(engine, ds_start, ds_end)
 
     with tab3:
         _render_gee_smap_tab(engine=engine, ds_start=ds_start, ds_end=ds_end)

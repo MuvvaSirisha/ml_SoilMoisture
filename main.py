@@ -19,7 +19,6 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import os
 import re
-import subprocess
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,66 +27,11 @@ from engine import SM_Engine
 from agent import OllamaAgent
 from Query_classifier import QueryClassifier
 from utils import QueryValidator, DateAnalyzer
-from literature_manager import LiteratureManager
-from literature_qa import (
-    answer_from_literature,
-    get_literature_context,
-    parse_literature_command,
-)
+
 from intent_classifier import classify_query_intent
 from guardrails import QueryGuard
 
-# ============================================================================
-# LITERATURE HELP BLOCK
-# ============================================================================
 
-LITERATURE_HELP_BLOCK = """
-  ─────────────────────────────────────────────────────────────────────────
-  📚  LITERATURE Q&A  (text + vision + tables)
-  ─────────────────────────────────────────────────────────────────────────
-  load literature <path>    Load PDF / DOCX / TXT files
-  list literature           Show loaded literature files
-  clear literature          Remove all literature
-  vision status             Show extracted figures + tables summary
-  vision images [file]      List figures for a specific PDF
-  list tables               List all extracted tables with links
-
-  FIGURE / TABLE LINKS:
-    "show me figure 3"               → opens figure 3 in image viewer
-    "give me table 2 from anoop"     → opens table 2 image + shows data
-    "where is image 5"               → opens file + prints path
-    "open figure on page 4"          → opens all assets on page 4
-
-  INDIRECT IMAGE QUERIES:
-    "explain the methodology chart"  → minicpm-v explains + shows related image
-    "what does the scatter plot show" → minicpm-v answers + shows related image
-    "describe the trend graph"       → minicpm-v answers + shows related image
-
-  ROUTING:
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │ Dataset statistics / maps       → DATASET                           │
-  │ Scientific explanations/papers  → LITERATURE (text)                 │
-  │ Figures / charts / diagrams     → LITERATURE (vision / minicpm-v)      │
-  │ Table content / data            → LITERATURE (table extraction)     │
-  │ Explicit request for both       → BOTH                              │
-  └──────────────────────────────────────────────────────────────────────┘
-
-  DATASET EXAMPLES:
-    What is mean soil moisture in India in 2020?
-    Show mean moisture values of Kerala in 2007 and 2019
-    Show map of mean moisture values of Kerala in 2020 and 2021
-    Compare India in 2018, 2020 and 2022
-    Compare Rajasthan and Gujarat in 2021
-
-  LITERATURE TEXT EXAMPLES:
-    Explain AMSR2 retrieval algorithm
-    What RMSE was reported for AMSR2 validation?
-    Summarise LPRM_Anoop.pdf in 3 points
-
-  BOTH EXAMPLES:
-    Compare 2020 drought data and explain literature findings
-  ─────────────────────────────────────────────────────────────────────────
-"""
 
 # ============================================================================
 # HEADER
@@ -122,7 +66,6 @@ def display_header():
 📊 OUTPUT OPTIONS
    scalar / map / both   (default: both — always shows map + stats)
 """)
-    print(LITERATURE_HELP_BLOCK)
     print("\nType 'exit' to quit, 'help' to display this again.")
     print("=" * 75 + "\n")
 
@@ -333,98 +276,6 @@ def _print_available_regions(engine):
     print()
 
 # ============================================================================
-# IMAGE DISPLAY HELPER  (NEW in v2.8)
-# ============================================================================
-
-def display_images_from_answer(image_display_list: list):
-    """
-    Display images returned by the literature pipeline after any vision answer.
-
-    For direct requests ("show me figure 3") AND indirect queries
-    ("explain the methodology chart"), any related images are surfaced here.
-
-    Strategy (priority order):
-      1. PIL .show() → opens OS default image viewer
-      2. imgcat      → inline terminal rendering (iTerm2 / VS Code terminal)
-      3. OS default viewer (startfile / open / xdg-open)
-      4. Print path for manual copy-paste
-    """
-    if not image_display_list:
-        return
-
-    print(f"\n🖼️  {len(image_display_list)} related image(s) — opening now:")
-
-    for i, dd in enumerate(image_display_list, start=1):
-        rtype   = dd.get("type", "image")
-        label   = "Table" if rtype == "table" else "Figure"
-        caption = dd.get("caption", "")
-        path    = dd.get("path", "")
-        uri     = dd.get("uri", "")
-        source  = dd.get("source", "")
-        page    = dd.get("page", "?")
-        idx     = dd.get("index", "?")
-
-        print(f"\n  [{i}] {label} {idx}  |  page {page}  |  {source}")
-        if caption:
-            print(f"       Caption : {caption}")
-        if path:
-            print(f"       Path    : {path}")
-        if uri:
-            print(f"       Link    : {uri}")
-
-        if not path or not os.path.isfile(path):
-            print("       ⚠️  Image file not found on disk.")
-            continue
-
-        opened = False
-
-        # ── 1. PIL (Disabled to prevent popping out) ──────────────────
-        # try:
-        #     from PIL import Image as PILImage
-        #     img = PILImage.open(path)
-        #     img.show(title=f"{label} {idx} — {source}")
-        #     print("       ✅ Opened in image viewer (PIL).")
-        #     opened = True
-        # except ImportError:
-        #     pass
-        # except Exception as e:
-        #     print(f"       ⚠️  PIL open failed: {e}")
-
-        # ── 2. imgcat (inline terminal) ───────────────────────────────
-        if not opened:
-            try:
-                result = subprocess.run(
-                    ["imgcat", path],
-                    capture_output=False,
-                    timeout=5,
-                )
-                if result.returncode == 0:
-                    opened = True
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
-
-        # ── 3. OS default viewer (Disabled to prevent popping out) ─────
-        # if not opened:
-        #     try:
-        #         if sys.platform.startswith("win"):
-        #             os.startfile(path)          # type: ignore[attr-defined]
-        #             print("       ✅ Opened with Windows viewer.")
-        #             opened = True
-        #         elif sys.platform == "darwin":
-        #             subprocess.Popen(["open", path])
-        #             print("       ✅ Opened with macOS viewer.")
-        #             opened = True
-        #         else:
-        #             subprocess.Popen(["xdg-open", path])
-        #             print("       ✅ Opened with system viewer.")
-        #             opened = True
-        #     except Exception as e:
-        #         print(f"       ⚠️  OS viewer failed: {e}")
-
-        if not opened:
-            print("       ℹ️  Copy the path or link above to open/view the image.")
-
-# ============================================================================
 # PROCESS SINGLE QUERY (dataset path)
 # ============================================================================
 
@@ -436,7 +287,6 @@ def process_single_query(
     validator,
     ds_start,
     ds_end,
-    lit_manager=None,
     query_index=None,
     intent="dataset",
 ):
@@ -469,7 +319,7 @@ def process_single_query(
 
     if cls["operation"] == "comparison":
         _run_comparison_query(
-            cls, engine, validator, ds_start, ds_end, lit_manager, intent
+            cls, engine, validator, ds_start, ds_end, intent
         )
         return
 
@@ -477,7 +327,7 @@ def process_single_query(
 
     if len(all_ranges) <= 1:
         _run_single_date_range(
-            cls, engine, validator, ds_start, ds_end, lit_manager, intent,
+            cls, engine, validator, ds_start, ds_end, intent,
             start_date=cls["start_date"],
             end_date=cls["end_date"],
         )
@@ -507,7 +357,7 @@ def process_single_query(
             viz_filename = get_unique_viz_filename(cls["operation"], index=i)
 
         _run_single_date_range(
-            cls, engine, validator, ds_start, ds_end, lit_manager, intent,
+            cls, engine, validator, ds_start, ds_end, intent,
             start_date=s,
             end_date=e,
             viz_filename=viz_filename,
@@ -515,7 +365,7 @@ def process_single_query(
 
 
 def _run_single_date_range(cls, engine, validator, ds_start, ds_end,
-                            lit_manager, intent,
+                            intent,
                             start_date=None, end_date=None,
                             viz_filename="latest_analysis.png"):
     s = start_date or cls["start_date"]
@@ -572,8 +422,7 @@ def _run_single_date_range(cls, engine, validator, ds_start, ds_end,
             pass
 
 
-def _run_comparison_query(cls, engine, validator, ds_start, ds_end,
-                           lit_manager, intent):
+def _run_comparison_query(cls, engine, validator, ds_start, ds_end, intent):
     comparison_info = build_comparison_info(cls)
     ctype = comparison_info["comparison_type"]
 
@@ -681,175 +530,6 @@ def _run_comparison_query(cls, engine, validator, ds_start, ds_end,
             pass
 
 # ============================================================================
-# NOTEBOOK-STYLE LITERATURE ANSWER PRINTER
-# ============================================================================
-
-def print_literature_answer(query: str, answer: str, source_label: str = ""):
-    import textwrap
-    width = 75
-
-    answer_body    = answer
-    asset_section  = ""
-    source_section = ""
-
-    if "\n📎 Source asset(s):" in answer:
-        parts       = answer.split("\n📎 Source asset(s):", 1)
-        answer_body = parts[0].strip()
-        rest        = "📎 Source asset(s):" + parts[1]
-        if "\n─" in rest and "\n📚 Sources:" in rest:
-            rest_parts     = rest.split("\n─", 1)
-            asset_section  = rest_parts[0].strip()
-            source_section = ("─" + rest_parts[1]).strip()
-        else:
-            asset_section = rest.strip()
-
-    elif "\n─" * 1 in answer and "📚 Sources:" in answer:
-        parts          = answer.split("\n─", 1)
-        answer_body    = parts[0].strip()
-        source_section = ("─" + parts[1]).strip()
-
-    print("\n" + "╔" + "═" * (width - 2) + "╗")
-    print("║  📖  LITERATURE ANSWER" + " " * (width - 25) + "║")
-    print("╠" + "═" * (width - 2) + "╣")
-
-    if source_label:
-        label_line = f"║  Source : {source_label}"
-        print(label_line + " " * max(0, width - len(label_line) - 1) + "║")
-        print("╠" + "═" * (width - 2) + "╣")
-
-    print("║" + " " * (width - 2) + "║")
-
-    for line in answer_body.splitlines():
-        if not line.strip():
-            print("║" + " " * (width - 2) + "║")
-            continue
-        wrapped = textwrap.wrap(line, width=width - 6) or [""]
-        for wl in wrapped:
-            row = f"║  {wl}"
-            print(row + " " * max(0, width - len(row) - 1) + "║")
-
-    print("║" + " " * (width - 2) + "║")
-
-    if asset_section:
-        print("╠" + "═" * (width - 2) + "╣")
-        print("║  📎  ASSETS / LINKS" + " " * (width - 22) + "║")
-        print("╠" + "═" * (width - 2) + "╣")
-        print("║" + " " * (width - 2) + "║")
-        for line in asset_section.splitlines():
-            if not line.strip() or line.startswith("📎 Source asset(s):"):
-                continue
-            if len(line) <= width - 6:
-                row = f"║  {line}"
-                print(row + " " * max(0, width - len(row) - 1) + "║")
-            else:
-                row = f"║  {line[:width-9]}..."
-                print(row + " " * max(0, width - len(row) - 1) + "║")
-        print("║" + " " * (width - 2) + "║")
-
-    if source_section:
-        print("╠" + "═" * (width - 2) + "╣")
-        print("║  📚  CITATIONS" + " " * (width - 17) + "║")
-        print("╠" + "═" * (width - 2) + "╣")
-        print("║" + " " * (width - 2) + "║")
-        for line in source_section.splitlines():
-            if line.startswith("─") or line.startswith("📚 Sources:"):
-                continue
-            if not line.strip():
-                continue
-            row = f"║  {line}"
-            print(row + " " * max(0, width - len(row) - 1) + "║")
-        print("║" + " " * (width - 2) + "║")
-
-    print("╚" + "═" * (width - 2) + "╝")
-    if asset_section:
-        _print_full_paths(asset_section)
-
-
-def _print_full_paths(asset_text: str):
-    lines    = asset_text.splitlines()
-    has_long = any(
-        ("Path" in l or "Link" in l or "file://" in l) and len(l) > 60
-        for l in lines
-    )
-    if not has_long:
-        return
-    print("\n  📋 Full paths (for copy-paste):")
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(("Path", "Link", "file://")):
-            print(f"     {stripped}")
-
-
-def print_asset_answer(answer: str):
-    width = 75
-    print("\n" + "┌" + "─" * (width - 2) + "┐")
-    print("│  📎  FIGURE / TABLE LOOKUP" + " " * (width - 29) + "│")
-    print("├" + "─" * (width - 2) + "┤")
-
-    path_lines = []
-    for line in answer.splitlines():
-        if not line.strip():
-            print("│" + " " * (width - 2) + "│")
-            continue
-        if ("Path" in line or "Link" in line or "file://" in line) and len(line) > width - 6:
-            path_lines.append(line.strip())
-            short = line[:width - 9] + "..."
-            row   = f"│  {short}"
-            print(row + " " * max(0, width - len(row) - 1) + "│")
-        else:
-            row = f"│  {line}"
-            print(row + " " * max(0, width - len(row) - 1) + "│")
-
-    print("└" + "─" * (width - 2) + "┘")
-    if path_lines:
-        print("\n  📋 Full paths (copy-paste):")
-        for p in path_lines:
-            print(f"     {p}")
-
-
-def _is_asset_lookup_answer(answer: str) -> bool:
-    indicators = ["📎", "🖼️  Figure", "📊 Table",
-                  "Path    :", "Link    :", "file://", "Caption :", "Preview :"]
-    return any(ind in answer for ind in indicators)
-
-# ============================================================================
-# LITERATURE HELPERS
-# ============================================================================
-
-def _resolve_lit_path(config_path: str) -> str:
-    if os.path.isabs(config_path):
-        return config_path
-    return os.path.join(PROJECT_ROOT, config_path)
-
-
-def _setup_literature(lit_manager: LiteratureManager, lit_dir: str):
-    print(f"\n📚 Literature folder: {lit_dir}")
-    if not os.path.isdir(lit_dir):
-        os.makedirs(lit_dir, exist_ok=True)
-        print("📁 Literature folder created. Add files and restart.")
-        return
-
-    supported_exts = {".pdf", ".docx", ".txt", ".md"}
-    all_files = [
-        f for f in sorted(os.listdir(lit_dir))
-        if os.path.splitext(f)[1].lower() in supported_exts
-    ]
-
-    if not all_files:
-        print("⚠️  No literature files found.")
-        return
-
-    print(f"Found {len(all_files)} file(s). Loading literature...")
-    lit_manager.load_directory(lit_dir)
-    lit_manager.set_literature_dir(lit_dir)
-
-    sources = lit_manager.list_sources()
-    if sources:
-        print("\n" + lit_manager.summary())
-    else:
-        print("⚠️  Literature loaded but no text extracted.")
-
-# ============================================================================
 # MAIN APPLICATION LOOP
 # ============================================================================
 
@@ -869,30 +549,13 @@ def run_app():
     agent      = OllamaAgent(model_name=Config.OLLAMA_MODEL)
     validator  = QueryValidator()
 
-    lit_index_path = _resolve_lit_path(Config.LITERATURE_INDEX_PATH)
-
-    try:
-        from cloud.literature_manager import sync_literature
-        lit_dir = sync_literature()
-    except Exception as e:
-        print(f"⚠️  Could not sync literature from Google Drive: {e}")
-        lit_dir = _resolve_lit_path(Config.LITERATURE_DIR)
-
-    lit_manager = LiteratureManager(
-        index_path        = lit_index_path,
-        vision_enabled    = Config.VISION_ENABLED,
-        vision_cache_dir  = Config.VISION_IMAGE_CACHE_DIR,
-        vision_max_images = Config.VISION_MAX_IMAGES_PER_PDF,
-    )
-    _setup_literature(lit_manager, lit_dir)
-
     ds_start, ds_end = get_dataset_bounds(engine)
     if ds_start and ds_end:
         print(f"\n📅 Dataset covers: {ds_start} → {ds_end}\n")
     else:
         print("\n⚠️  Could not determine dataset range.\n")
 
-    print("🤖 System ready! Semantic + Vision + Table routing active.\n")
+    print("🤖 System ready!\n")
 
     while True:
         try:
@@ -918,18 +581,6 @@ def run_app():
                 print(f"\n🛡️ Guardrail Alert: {safety_check['reason']}")
                 continue
 
-            lower_input = raw_input_text.lower()
-            if lower_input in ("list tables", "show tables", "tables"):
-                result = parse_literature_command(raw_input_text, lit_manager)
-                if result:
-                    print(result)
-                continue
-
-            lit_cmd_result = parse_literature_command(raw_input_text, lit_manager)
-            if lit_cmd_result is not None:
-                print(lit_cmd_result)
-                continue
-
             sub_queries = split_queries(raw_input_text)
             if len(sub_queries) > 1:
                 print(f"\n📋 Detected {len(sub_queries)} queries.")
@@ -944,81 +595,15 @@ def run_app():
                         timeout      = Config.OLLAMA_TIMEOUT,
                     )
 
-                    has_literature = bool(lit_manager.list_sources())
-
-                    if intent in ("literature", "both"):
-                        if not has_literature:
-                            print("\n📚 No literature loaded.")
-                            if intent == "literature":
-                                continue
-                            print("↩  Running dataset analysis only.")
-                        else:
-                            print("\n⏳ Searching literature (text + vision + tables)...")
-
-                            source_filter = lit_manager.resolve_source_filter(sq)
-                            if source_filter:
-                                src_label = lit_manager.get_file_display_name(
-                                    source_filter)
-                                print(f"  📂 Scoped to: {source_filter}")
-                            else:
-                                src_label = ", ".join(
-                                    lit_manager.get_file_display_name(s)
-                                    for s in lit_manager.list_sources()
-                                )
-                                print(f"  📂 Searching all files: {src_label}")
-
-                            # ── UPDATED: unpack 3 values ───────────────
-                            ds_q_for_both = sq
-                            lit_query     = sq
-                            if intent == "both":
-                                from utils import split_both_query_with_llm
-                                ds_q_for_both, lit_query = split_both_query_with_llm(
-                                    sq, Config.OLLAMA_URL, Config.OLLAMA_MODEL,
-                                    Config.OLLAMA_TIMEOUT
-                                )
-
-                            answer, found_in_lit, image_display_list = answer_from_literature(
-                                query          = lit_query,
-                                lit_manager    = lit_manager,
-                                ollama_url     = Config.OLLAMA_URL,
-                                ollama_model   = Config.OLLAMA_MODEL,
-                                ollama_timeout = Config.OLLAMA_TIMEOUT,
-                                top_k          = Config.LITERATURE_TOP_K,
-                                vision_model   = Config.VISION_MODEL,
-                                vision_timeout = Config.VISION_TIMEOUT,
-                                vision_top_k   = Config.VISION_TOP_K,
-                                vision_enabled = Config.VISION_ENABLED,
-                            )
-
-                            if answer:
-                                if _is_asset_lookup_answer(answer):
-                                    print_asset_answer(answer)
-                                else:
-                                    print_literature_answer(sq, answer, src_label)
-                                # ── NEW: display related images ────────
-                                display_images_from_answer(image_display_list)
-                            else:
-                                print(
-                                    "\n❓ No relevant passages, figures, "
-                                    "or tables found."
-                                )
-
-                            if intent == "literature":
-                                continue
-
-                            print("\n🔄 Running dataset analysis as well...")
-
-                    if intent in ("dataset", "both"):
-                        _ds_q = ds_q_for_both if intent == "both" and 'ds_q_for_both' in dir() else sq
+                    if intent in ("dataset", "both", "literature"):
                         process_single_query(
-                            _ds_q,
+                            sq,
                             engine,
                             classifier,
                             agent,
                             validator,
                             ds_start,
                             ds_end,
-                            lit_manager = (lit_manager if intent == "both" else None),
                             query_index = (idx if len(sub_queries) > 1 else None),
                             intent      = intent,
                         )

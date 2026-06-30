@@ -22,6 +22,19 @@ OLLAMA_MODEL   = "qwen2.5:3b"    # text-only model for NLP tasks
 OLLAMA_TIMEOUT = 180             # increased to 180s to prevent timeouts on average machines
 
 # ============================================================================
+# GOOGLE EARTH ENGINE CONFIGURATION
+# ============================================================================
+
+import os as _os
+try:
+    from dotenv import load_dotenv as _ldenv
+    _ldenv()
+except ImportError:
+    pass
+
+GEE_PROJECT_ID = _os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+
+# ============================================================================
 # GUARDRAILS CONFIGURATION
 # ============================================================================
 
@@ -39,23 +52,6 @@ Respond ONLY with a valid JSON object in this exact format:
 User query: {query}
 """
 
-# ============================================================================
-# VISION MODEL CONFIGURATION  (minicpm-v / multimodal)
-# ============================================================================
-
-# Using minicpm-v:latest — the state-of-the-art vision model for literature Q&A.
-# Pull command:
-#   ollama pull minicpm-v:latest
-#
-# minicpm-v is extremely lightweight and provides superb diagram and table analysis.
-# Increase VISION_TIMEOUT if you consistently see timeout errors on slow hardware.
-
-VISION_MODEL              = "minicpm-v:latest"
-VISION_TIMEOUT            = 300          # seconds
-VISION_MAX_IMAGES_PER_PDF = 20            # max figures extracted per PDF
-VISION_IMAGE_CACHE_DIR    = "literature_images"   # where extracted figures are saved
-VISION_TOP_K              = 2             # reduced from 3 → fewer images = faster
-VISION_ENABLED            = True          # set False to disable vision pipeline
 
 # ============================================================================
 # VALID REGIONS
@@ -190,6 +186,19 @@ SEASONS = {
 }
 
 # ============================================================================
+# TREND ANALYSIS THRESHOLDS  (WMO / hydrology standards)
+# ============================================================================
+
+# Hard minimum: fewer than this many years → block trend, return error message.
+# Any fewer data points make Mann-Kendall p-values and Sen's slope unreliable.
+MIN_TREND_YEARS = 2
+
+# Reliability warning threshold (WMO recommendation for climate trend analysis).
+# When n_years < TREND_WARN_YEARS the trend is computed but a caution banner
+# is displayed on the chart and in the scalar output.
+TREND_WARN_YEARS = 5
+
+# ============================================================================
 # COMPARISON METRIC MAPPING
 # ============================================================================
 
@@ -223,27 +232,28 @@ DISPLAY_TEMPLATES = {
 
     'slope_scalar': """
 ╔════════════════════════════════════════════════════════════════════════╗
-║                   📈 SOIL MOISTURE TREND ANALYSIS                      
+║               📈 SOIL MOISTURE TREND ANALYSIS (Mann-Kendall)           
 ╠════════════════════════════════════════════════════════════════════════╣
 ║ Region:   {region}
 ║ Period:   {start_date} to {end_date}
-║ Duration: {duration} days
+║ Years:    {n_years} annual values
 ╠════════════════════════════════════════════════════════════════════════╣
 ║                        🔍 TREND STATISTICS                             
 ║
-║  Trend Direction:   {direction}
-║  Slope:             {slope:.8f} m³/m³/day
-║  R-squared:         {r_squared:.6f}
-║  P-value:           {p_value:.6f}
-║  Significance:      {significance}
+║  Trend Direction:     {direction}
+║  Sen's Slope:         {slope:.8f} m³/m³/year  (robust estimator)
+║  Mann-Kendall τ:      {mk_tau:.4f}             (rank correlation)
+║  MK P-value:          {p_value:.6f}
+║  Significance:        {significance}
 ║
-║  Total Change:      {total_change:.6f} m³/m³ over the period
+║  Total Change:        {total_change:.6f} m³/m³ over {n_years} years
 ╠════════════════════════════════════════════════════════════════════════╣
 ║ 📍 INTERPRETATION:
 ║    • Positive slope → Soil getting WETTER (Moisture increasing)
 ║    • Negative slope → Soil getting DRIER  (Moisture decreasing)
-║    • P-value < 0.05 → Trend is STATISTICALLY SIGNIFICANT
-║    • P-value ≥ 0.05 → Trend may be DUE TO CHANCE
+║    • MK P-value < 0.05 → Trend is STATISTICALLY SIGNIFICANT
+║    • MK P-value ≥ 0.05 → Trend may be DUE TO CHANCE
+║    • Sen's Slope is median-based — robust to outlier years
 ╚════════════════════════════════════════════════════════════════════════╝
 """,
 
@@ -331,22 +341,8 @@ ERROR_MESSAGES = {
     'ollama_error':              "Ollama error. Using fallback extraction",
     'ollama_timeout':            "Ollama request timed out. Using fallback extraction",
     'comparison_missing_second': "Comparison requires two time periods or two regions. Please specify both.",
-    'vision_not_enabled':        "Vision pipeline is disabled. Set VISION_ENABLED=True in Config.py.",
-    'vision_no_images':          "No figures/images have been extracted from the loaded literature.",
-    'vision_model_missing':      "Vision model '{model}' not found. Run: ollama pull {model}",
 }
 
-# ============================================================================
-# SUCCESS/INFO MESSAGES
-# ============================================================================
-
-SUCCESS_MESSAGES = {
-    'analysis_complete':   "✅ Analysis complete!",
-    'check_visualization': "📊 visualization ready!",
-    'engine_ready':        "✅ Engine loaded successfully!",
-    'ollama_ready':        "🤖 Ollama Agent ready!",
-    'vision_ready':        "🖼️  Vision pipeline ready (llava:7b)!",
-}
 
 # ============================================================================
 # ANALYSIS FLAGS
@@ -363,30 +359,16 @@ ANALYSIS_FLAGS = {
 }
 
 # ============================================================================
-# LITERATURE / RAG CONFIGURATION
-# ============================================================================
-
-LITERATURE_DIR        = "literature"
-LITERATURE_INDEX_PATH = "literature_index.json"
-LITERATURE_TOP_K      = 2             # reduced from 3 → fewer chunks retrieved = faster LLM prompts
-
-# ============================================================================
 # MODEL GENERATION SETTINGS
 # ============================================================================
 
 # Deterministic routing/classification tasks
 INTENT_TEMP            = 0
 QUERY_CLASSIFIER_TEMP  = 0
-PATCH_TEMP             = 0
 
 # Structured analytical tasks
 AGENT_TEMP             = 0.1
 ENGINE_TEMP            = 0.2
-LITERATURE_MANAGER_TEMP = 0.1
-
-# Natural language explanation tasks
-LITERATURE_QA_TEMP     = 0.3
-SUMMARY_TEMP           = 0.4
 
 # Sampling controls
 STRICT_TOP_P           = 0.1

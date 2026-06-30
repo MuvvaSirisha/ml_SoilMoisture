@@ -1,32 +1,29 @@
 # Core data science
-xarray
-numpy
-pandas
-scipy
-matplotlib
-geopandas
-rioxarray
-shapely
-rasterio
+xarray==2026.4.0
+numpy==2.4.4
+pandas==3.0.2
+scipy==1.17.1
+matplotlib==3.10.9
+
+# Spatial / GIS
+geopandas==1.1.3
+shapely==2.1.2
+rioxarray==0.22.0
+rasterio==1.5.0
 
 # Google Drive integration
-pydrive2
-oauth2client
+pydrive2==1.21.3
+oauth2client==4.1.3
 
 # Google Earth Engine (for GEE SMAP tab)
-earthengine-api
+earthengine-api==1.7.26
 
 # Streamlit UI
-streamlit
-plotly
+streamlit==1.57.0
+plotly==6.7.0
 
 # HTTP requests (Ollama LLM calls)
-requests
-
-# PDF / literature management
-pymupdf          # fitz — PDF parsing
-python-docx      # DOCX parsing
-Pillow           # image processing
+requests==2.33.1
 
 # Environment variable management
-python-dotenv
+python-dotenv==1.2.2
