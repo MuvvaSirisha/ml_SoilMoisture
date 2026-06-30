@@ -61,20 +61,38 @@ class OutputFormatter:
 
     @staticmethod
     def _format_scalar_slope(data, region, start_date, end_date):
-        duration     = (datetime.strptime(end_date, '%Y-%m-%d') -
-                        datetime.strptime(start_date, '%Y-%m-%d')).days + 1
-        direction    = "\U0001f4c8 Increasing (Getting Wetter)" if data['slope'] > 0 else "\U0001f4c9 Decreasing (Getting Drier)"
-        significance = "\u2705 Statistically Significant" if data['p_value'] < 0.05 else "\u26a0\ufe0f Not Significant (p \u2265 0.05)"
-        total_change = data['slope'] * duration
+        from Config import TREND_WARN_YEARS
+        n_years      = data.get('n_years', data.get('count', '?'))
+        mk_tau       = data.get('mk_tau', 0.0)
+        slope        = data.get('slope', 0.0)
+        p_val        = data.get('p_value', 1.0)
+        total_change = data.get('total_change', slope * (n_years if isinstance(n_years, (int, float)) else 0))
+        direction    = "📈 Increasing (Getting Wetter)" if slope > 0 else "📉 Decreasing (Getting Drier)"
+        significance = "✅ Statistically Significant" if p_val < 0.05 else "⚠️ Not Significant (MK p ≥ 0.05)"
+        reliability_warning = data.get('reliability_warning', False)
+
+        warn_block = ""
+        if reliability_warning:
+            warn_block = (
+                f"\n\n> ⚠️ **Caution — Short Time Series ({n_years} years)**\n"
+                f"> We recommend at least {TREND_WARN_YEARS} years of data for a reliable trend.\n"
+                f"> These results are indicative only. Consider extending your date range."
+            )
+
         return (
-            f"**\U0001f4c8 Soil Moisture Trend — {region}**\n\n"
-            f"**Period:** {start_date} \u2192 {end_date} &nbsp; ({duration} days)\n\n"
+            f"**📈 Soil Moisture Trend — {region}**\n\n"
+            f"**Period:** {start_date} → {end_date} &nbsp; ({n_years} years)\n\n"
             f"---\n\n"
-            f"**Trend:** {direction} &nbsp; {significance}\n\n"
-            f"**Slope:** `{data['slope']:.8f} m\u00b3/m\u00b3/day`\n\n"
-            f"**Total Change:** `{total_change:+.6f} m\u00b3/m\u00b3` over the period\n\n"
-            f"> Positive slope = soil getting wetter &nbsp;|&nbsp; Negative slope = soil getting drier"
+            f"**Method:** Robust trend analysis (minimizes the effect of extreme years)\n\n"
+            f"**Overall Trend:** {direction} &nbsp; {significance}\n\n"
+            f"**Estimated Rate:** `{slope:.8f} m³/m³/year`\n\n"
+            f"**Total Change:** `{total_change:+.6f} m³/m³` over {n_years} years\n\n"
+            f"> Positive rate = soil getting wetter &nbsp;|&nbsp; Negative rate = soil getting drier\n\n"
+            f"> Stippled pixels on map = Confirmed trend &nbsp;|&nbsp; "
+            f"Green line = Main trend &nbsp;|&nbsp; Red dashed = Alternative estimate"
+            f"{warn_block}"
         )
+
 
     # ------------------------------------------------------------------
     # MINIMUM

@@ -513,6 +513,21 @@ class QueryClassifier:
           • comma/and-separated years:     2018, 2020 and 2022 → 3 ranges
         """
 
+        # ── Pattern A2: dual-span  "between YYYY to YYYY and YYYY to YYYY"
+        #               or simply  "YYYY to YYYY and YYYY to YYYY"
+        #  Handles queries like: "compare india between 2002 to 2012 and 2013 to 2023"
+        dual_span = re.search(
+            r'\b(?:between\s+)?(\d{4})\s+to\s+(\d{4})\s+and\s+(\d{4})\s+to\s+(\d{4})\b', q
+        )
+        if dual_span:
+            y1a, y1b = int(dual_span.group(1)), int(dual_span.group(2))
+            y2a, y2b = int(dual_span.group(3)), int(dual_span.group(4))
+            if all(1990 <= y <= 2100 for y in (y1a, y1b, y2a, y2b)):
+                span1 = (f"{min(y1a,y1b)}-01-01", f"{max(y1a,y1b)}-12-31")
+                span2 = (f"{min(y2a,y2b)}-01-01", f"{max(y2a,y2b)}-12-31")
+                if span1 != span2:
+                    return [span1, span2]
+
         # ── Pattern A: between YYYY and YYYY ──────────────────────────
         between = re.search(r'\bbetween\s+(\d{4})\s+and\s+(\d{4})\b', q)
         if between:

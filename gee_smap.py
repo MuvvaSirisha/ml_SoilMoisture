@@ -93,7 +93,7 @@ def get_smap_timeseries_gee(
     start_date:  str,
     end_date:    str,
     region_name: str,
-    band:        str = "ssm",
+    band:        str = "soil_moisture_am",
     scale:       int = 9_000,
 ) -> tuple[Optional[pd.DataFrame], str]:
     try:
@@ -175,10 +175,17 @@ def get_smap_multiband_gee(
     if region_name not in INDIA_REGIONS:
         return None, f"Region '{region_name}' not found."
 
+    # GEE filterDate end is exclusive — add 1 day so the requested end_date is included
+    try:
+        _e = datetime.date.fromisoformat(end_date)
+        edate_str = (_e + datetime.timedelta(days=1)).isoformat()
+    except Exception:
+        edate_str = end_date
+
     bbox   = INDIA_REGIONS[region_name]
     region = ee.Geometry.Rectangle([bbox[0], bbox[1], bbox[2], bbox[3]])
     col    = (ee.ImageCollection(GEE_COLLECTION)
-              .filterDate(start_date, end_date)
+              .filterDate(start_date, edate_str)
               .filterBounds(region)
               .select(bands))
 
@@ -223,7 +230,7 @@ def get_smap_spatial_grid_gee(
     start_date:  str,
     end_date:    str,
     region_name: str,
-    band:        str = "ssm",
+    band:        str = "soil_moisture_am",
     scale:       int = 9_000,
 ) -> tuple[Optional[dict], str]:
     """
